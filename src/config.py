@@ -134,7 +134,7 @@ class Config(BaseModel):
     distilled_model_id: str
 
     # HF
-    hub_token: str = "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"
+    hub_token: str
 
     # Dataset hyperparameters
     dataset_id: str
