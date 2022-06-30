@@ -433,10 +433,10 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
 
             if config.push_to_hub:
                 repo.push_to_hub(
-                    commit_message="End of epoch",
+                    commit_message=f"End of epoch {epoch}",
                     auto_lfs_prune=True,
                 )
-            logging.info("Saved model, at end of epoch...")
+            logging.info(f"Saved model, at end of epoch {epoch}...")
 
 
 def count_parameters(model):
