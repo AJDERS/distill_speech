@@ -3,6 +3,7 @@ import os
 import math
 import torch
 import logging
+from numpy import Inf
 from tqdm import tqdm
 from config import Config
 from data import AudioDataset
@@ -276,8 +277,18 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
 
     completed_steps = 0
     starting_epoch = 0
+    patience = 1
+    progress_bar = tqdm(range(max_train_steps))
+    completed_steps = 0
+    starting_epoch = 0
+    current_best_val_logs = {
+        "val_loss": Inf,
+        "val_contrastive_loss_diff": Inf,
+        "val_diversity_loss_diff": Inf,
+        "val_num_losses": Inf,
+    }
 
-    def evaluate(batch):
+    def evaluate(batch, current_best_val_logs, patience):
         # Validate
         student_model.eval()
         # init logs
@@ -304,24 +315,35 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
                     dim=-1,
                 ),
             )
-        val_logs["val_loss"] += loss
-        val_logs["val_contrastive_loss_diff"] += (
-            teacher_outputs.contrastive_loss - student_outputs.contrastive_loss
-        )
-        val_logs["val_diversity_loss_diff"] += (
-            teacher_outputs.diversity_loss - student_outputs.diversity_loss
-        )
-        val_logs["val_num_losses"] += batch["mask_time_indices"].sum()
+            val_logs["val_loss"] += loss
+            val_logs["val_contrastive_loss_diff"] += (
+                teacher_outputs.contrastive_loss - student_outputs.contrastive_loss
+            )
+            val_logs["val_diversity_loss_diff"] += (
+                teacher_outputs.diversity_loss - student_outputs.diversity_loss
+            )
+            val_logs["val_num_losses"] += batch["mask_time_indices"].sum()
+
+        # Make validation logs, and write to log.
         val_logs = {k: v / val_logs["val_num_losses"] for k, v in val_logs.items()}
         log_str = ""
         for k, v in val_logs.items():
             log_str += "| {}: {:.3e}".format(k, v.item())
         logging.info(log_str)
 
-    # Only show the progress bar once on each machine.
-    progress_bar = tqdm(range(max_train_steps))
-    completed_steps = 0
-    starting_epoch = 0
+        # Early stopping
+        early_stop = False
+        if config.early_stopping:
+            if val_logs["val_loss"] > current_best_val_logs["val_loss"]:    
+                patience += 1
+                if patience >= config.early_stopping_patience:
+                    early_stop = True
+                    return current_best_val_logs, early_stop, patience
+            else:
+                patience = 0
+        return val_logs, early_stop, patience
+
+    #### Training loop
     for epoch in range(starting_epoch, config.epochs):
         student_model.train()
         teacher_model.eval()
@@ -401,33 +423,36 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
                     log_str += "| {}: {:.3e}".format(k, v.item())
                 logging.info(log_str)
 
-            # TODO Early stopping
-
-            #### Save model
-            if (step + 1) % (
-                config.gradient_accumulation_steps * config.saving_steps
-            ) == 0:
-                if (
-                    config.push_to_hub and epoch < config.epochs - 1
-                ) or save_dir is not None:
-                    student_model.save_pretrained(save_dir)
-
-                if config.push_to_hub and epoch < config.epochs - 1:
-                    repo.push_to_hub(
-                        commit_message=f"Training in progress step {completed_steps}",
-                        blocking=False,
-                        auto_lfs_prune=True,
-                    )
-                logging.info("Saved model...")
-
             #### Eval model
             if (step + 1) % (
                 config.gradient_accumulation_steps * config.eval_steps
             ) == 0:
-                evaluate(batch)
+                current_best_val_logs, early_stop, patience = evaluate(
+                    batch, current_best_val_logs, patience
+                )
+
+                # Saving new best model
+                if patience == 0 and not early_stop:
+                    if (
+                        config.push_to_hub and epoch < config.epochs - 1
+                    ) or save_dir is not None:
+                        student_model.save_pretrained(save_dir)
+
+                    if config.push_to_hub and epoch < config.epochs - 1:
+                        repo.push_to_hub(
+                            commit_message=f"Training in progress step {completed_steps}. New best model.",
+                            blocking=False,
+                            auto_lfs_prune=True,
+                        )
+                    logging.info("Saved model new best model...")
+                if early_stop:
+                    logging.info("Stopping training, early stopping patience ran out...")
+                    break
 
         # Always evaluate at end of epoch
-        evaluate(batch)
+        current_best_val_logs, early_stop, patience = evaluate(
+            batch, current_best_val_logs, patience
+        )
         if config.output_dir is not None:
             student_model.save_pretrained(save_dir)
 
