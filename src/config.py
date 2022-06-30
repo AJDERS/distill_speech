@@ -32,13 +32,15 @@ class Config(BaseModel):
             then both a validation and test set will be created from the train
             dataset. Defaults to 'test'.
         audio_column_name (str, optional):
-            The name of the column in the dataset containing the audio data. Defaults to 'audio'
+            The name of the column in the dataset containing the audio data.
+            Defaults to 'audio'
         max_duration_in_seconds (int, optional):
             The maximum length of audio clips in seconds. Defaults to 25.
         min_duration_in_seconds (int, optional):
             The minimum length of audio clips in seconds. Defaults to 0.
         preprocessing_num_workers (int, optional):
-            Number of workers used in multiprocessing of preprocessing. Defaults to number of cpus.
+            Number of workers used in multiprocessing of preprocessing.
+            Defaults to number of cpus.
         (teacher/student)_activation_dropout (float, optional):
             The dropout rate for the activation layer. Defaults to 0.1.
         (teacher/student)_attention_dropout (float, optional):
@@ -62,7 +64,8 @@ class Config(BaseModel):
         (teacher/student)_ctc_loss_reduction (str, optional):
             The reduction to use for the CTC loss. Defaults to 'sum'.
         distill_factor (int):
-            By how many factors we reduce height parameters from teacher to obtain student parameters.
+            By how many factors we reduce height parameters from teacher to obtain
+            student parameters.
         num_hidden_layers (int):
             Number of hidden layers in the Transformer encoder.
         num_attention_heads (int):
@@ -70,14 +73,17 @@ class Config(BaseModel):
         num_conv_pos_embedding_groups (int):
             Number of groups of 1D convolutional positional embeddings layer.
         tdnn_dim (tuple):
-            A tuple of integers defining the number of output channels of each 1D convolutional layer in the TDNN module
-            of the XVector model. The length of tdnn_dim defines the number of TDNN layers.
+            A tuple of integers defining the number of output channels of each 1D
+            convolutional layer in the TDNN module of the XVector model. The length
+            of tdnn_dim defines the number of TDNN layers.
         tdnn_kernel (tuple):
-            A tuple of integers defining the kernel size of each 1D convolutional layer in the TDNN module of the XVector model.
-            The length of tdnn_kernel has to match the length of tdnn_dim.
+            A tuple of integers defining the kernel size of each 1D convolutional
+            layer in the TDNN module of the XVector model. The length of tdnn_kernel
+            has to match the length of tdnn_dim.
         tdnn_dilation (tuple):
-            A tuple of integers defining the dilation factor of each 1D convolutional layer in TDNN module of the XVector model.
-            The length of tdnn_dilation has to match the length of tdnn_dim.
+            A tuple of integers defining the dilation factor of each 1D convolutional
+            layer in TDNN module of the XVector model. The length of tdnn_dilation has
+            to match the length of tdnn_dim.
         seed (int):
             Seed for random generation.
         output_dir (str):
@@ -101,7 +107,7 @@ class Config(BaseModel):
         adam_epsilon (float):
             epsilon parameter for Adam optimizer
         softmax_temperature (float):
-            Smoothing factor of softmax calculation in loss function.                 
+            Smoothing factor of softmax calculation in loss function.
         warmup_steps (int, optional):
             The number of warmup steps for the learning rate scheduler.
             Defaults to 500.
@@ -155,9 +161,11 @@ class Config(BaseModel):
     teacher_ctc_loss_reduction: str = "sum"
 
     # Student Model hyperparameters
-    distill_factor: int = 3 # tested, -1, 1, 2, 3
+    distill_factor: int = 3  # tested, -1, 1, 2, 3
     num_hidden_layers: int = 12  # Only necessary if `distill_factor` > 0
-    num_attention_heads: int = 8  # Only necessary if `distill_factor` > 0, must divide `embed_dim`
+    num_attention_heads: int = (
+        8  # Only necessary if `distill_factor` > 0, must divide `embed_dim`
+    )
     num_conv_pos_embedding_groups: int = 8  # Only necessary if `distill_factor` > 0
     tdnn_dim: Tuple[int] = (512, 512, 1500)  # Only necessary if `distill_factor` > 0
     tdnn_kernel: Tuple[int] = (5, 3, 3)  # Only necessary if `distill_factor` > 0
