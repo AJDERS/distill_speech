@@ -86,7 +86,7 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
         audio_column_name=config.audio_column_name,
         max_duration_in_seconds=config.max_duration_in_seconds,
         min_duration_in_seconds=config.min_duration_in_seconds,
-        preprocessing_num_workers=config.preprocessing_num_workers
+        preprocessing_num_workers=config.preprocessing_num_workers,
     )
     vectorized_dataset = dataset.process()
 
