@@ -35,6 +35,14 @@ class AudioDataset:
             Minimum duration of audio clips in seconds. Defaults to 0.
         preprocessing_num_workers (int)
             Number of workers used when preprocessing. Defaults to -1, indicating number of cpu cores.
+        num_train (int):
+            The number of entries to use for training.
+        num_test (int):
+            The number of entries to use for test.
+        num_val (int):
+            The number of entries to use for validation.
+        use_cached (bool):
+            Wether to use cached data or not.
     """
 
     def __init__(
@@ -53,6 +61,7 @@ class AudioDataset:
         num_train: int = None,
         num_test: int = None,
         num_val: int = None,
+        use_cached: bool = False,
     ):
         self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(
             pretrained_teacher_model_id
@@ -70,6 +79,7 @@ class AudioDataset:
         self.max_duration_in_seconds = max_duration_in_seconds
         self.min_duration_in_seconds = min_duration_in_seconds
         self.preprocessing_num_workers = preprocessing_num_workers
+        self.use_cached = use_cached
 
         # Load the dataset
         self._load_dataset()
@@ -223,7 +233,7 @@ class AudioDataset:
             prepare_batch,
             num_proc=self.preprocessing_num_workers,
             remove_columns=self.raw_datasets["train"].column_names,
-            load_from_cache_file=False
+            load_from_cache_file=self.use_cached
         )
         vectorized_datasets.cleanup_cache_files()
 

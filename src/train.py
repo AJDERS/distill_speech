@@ -6,6 +6,7 @@ import hydra
 import logging
 from numpy import Inf
 from tqdm import tqdm
+from torch.optim import AdamW
 from data import AudioDataset
 from omegaconf import DictConfig
 from math import log, ceil, floor
@@ -18,7 +19,6 @@ from data_collator import DataCollatorForWav2Vec2Pretraining
 from transformers import (
     Wav2Vec2Config,
     Wav2Vec2ForPreTraining,
-    AdamW,
     get_scheduler,
     set_seed,
 )
@@ -77,6 +77,7 @@ def train(config: DictConfig, **kwargs):
         num_train=config.data.num_train,
         num_test=config.data.num_test,
         num_val=config.data.num_val,
+        use_cached=config.data.use_cached,
     )
     vectorized_dataset = dataset.process()
 
