@@ -1,11 +1,11 @@
 defaults:
-  - pretrained_teacher_model_id: facebook/wav2vec2-xls-r-300m
-  - distilled_model_id: ajders/distilled_wav2vec2_xls_r_300m
+  - student: student
+  - teacher: teacher
   - _self_
 
 data:
   dataset_id: google/fleurs
-  dataset_subset: data/processed
+  dataset_subset: da_dk
   sampling_rate: 16_000
   train_name: train
   validation_name: validation
@@ -16,8 +16,9 @@ data:
   preprocessing_num_workers: -1
 
 models:
-  student: student
-  teacher: teacher
+  pretrained_teacher_model_id: facebook/wav2vec2-xls-r-300m
+  distilled_model_id: ajders/distilled_wav2vec2_xls_r_300m
+  hub_token: None
 
 training:
   seed: 703
