@@ -8,6 +8,9 @@ fastparquet~=0.8.1
 soundfile~=0.10.3
 librosa~=0.9.1
 
+# Configuration
+hydra-core~=1.2.0
+
 # Logging
 prettytable~=3.3.0
 

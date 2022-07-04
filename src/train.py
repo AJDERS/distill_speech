@@ -2,13 +2,13 @@
 import os
 import math
 import torch
+import hydra
 import logging
 from numpy import Inf
 from tqdm import tqdm
-from config import Config
 from data import AudioDataset
+from omegaconf import DictConfig
 from math import log, ceil, floor
-from typing import Optional, Union
 from prettytable import PrettyTable
 import torch.nn.functional as functional
 from huggingface_hub.repository import Repository
@@ -26,7 +26,8 @@ from transformers import (
 logging.basicConfig(level=logging.INFO)
 
 
-def train(config: Optional[Union[dict, Config]] = None, **kwargs):
+@hydra.main(config_path="../config", config_name="config", version_base=None)
+def train(config: DictConfig, **kwargs):
     """Distilling a smaller model from a pretrained audio model on a dataset.
     Args:
         config (Config, dict or None):
@@ -40,54 +41,42 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
     logging.info(f"GPU availability: {torch.cuda.is_available()}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
-    #### Load config
-
-    # If no config is provided, create a config object from the default
-    # parameters
-    if config is None:
-        config = Config(**kwargs)
-
-    # If a dict is provided, create a config object from the dict
-    elif isinstance(config, dict):
-        config = Config(**{**config, **kwargs})
-
-    # If a Config object is provided, update the config object with the
-    # provided keyword arguments
-    elif isinstance(config, Config) and len(kwargs) > 0:
-        config = Config(**{**config.__dict__, **kwargs})
-
     #### Set training seed.
-    if config.seed is not None:
-        set_seed(config.seed)
+    if config.training.seed is not None:
+        set_seed(config.training.seed)
 
     #### Create HF epository
-    if config.output_dir is not None:
+    if config.training.output_dir is not None:
         save_dir = os.path.join(
-            config.output_dir,
-            f"{config.pretrained_teacher_model_id}_{config.dataset_id}",
+            config.training.output_dir,
+            f"{config.models.pretrained_teacher_model_id}_{config.data.dataset_id}",
         )
-    if config.push_to_hub:
-        if config.distilled_model_id is None:
-            repo_name = get_full_repo_name(save_dir, token=config.hub_token)
+    if config.training.push_to_hub:
+        if config.models.distilled_model_id is None:
+            if config.models.hub_token != "None":
+                repo_name = get_full_repo_name(save_dir, token=config.models.hub_token)
         else:
-            repo_name = config.distilled_model_id
+            repo_name = config.models.distilled_model_id
         repo = Repository(save_dir, clone_from=repo_name)
-    elif config.output_dir is not None:
+    elif config.training.output_dir is not None:
         os.makedirs(save_dir, exist_ok=True)
 
     #### Load dataset
     dataset = AudioDataset(
-        pretrained_teacher_model_id=config.pretrained_teacher_model_id,
-        dataset_id=config.dataset_id,
-        dataset_subset=config.dataset_subset,
-        sampling_rate=config.sampling_rate,
-        train_name=config.train_name,
-        validation_name=config.validation_name,
-        test_name=config.test_name,
-        audio_column_name=config.audio_column_name,
-        max_duration_in_seconds=config.max_duration_in_seconds,
-        min_duration_in_seconds=config.min_duration_in_seconds,
-        preprocessing_num_workers=config.preprocessing_num_workers,
+        pretrained_teacher_model_id=config.models.pretrained_teacher_model_id,
+        dataset_id=config.data.dataset_id,
+        dataset_subset=config.data.dataset_subset,
+        sampling_rate=config.data.sampling_rate,
+        train_name=config.data.train_name,
+        validation_name=config.data.validation_name,
+        test_name=config.data.test_name,
+        audio_column_name=config.data.audio_column_name,
+        max_duration_in_seconds=config.data.max_duration_in_seconds,
+        min_duration_in_seconds=config.data.min_duration_in_seconds,
+        preprocessing_num_workers=config.data.preprocessing_num_workers,
+        num_train=config.data.num_train,
+        num_test=config.data.num_test,
+        num_val=config.data.num_val,
     )
     vectorized_dataset = dataset.process()
 
@@ -95,42 +84,43 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
 
     # Teacher model config, used to update student configs.
     teacher_model_config = Wav2Vec2Config.from_pretrained(
-        config.pretrained_teacher_model_id,
+        config.models.pretrained_teacher_model_id,
     )
     # Student model config.
     student_model_config = Wav2Vec2Config.from_pretrained(
-        config.pretrained_teacher_model_id
+        config.models.pretrained_teacher_model_id
     )
 
     # Set student parameters not related to model distilling.
-    student_model_config.activation_dropout = config.student_activation_dropout
-    student_model_config.attention_dropout = config.student_attention_dropout
-    student_model_config.hidden_dropout = config.student_hidden_dropout
-    student_model_config.feat_proj_dropout = config.student_feat_proj_dropout
-    student_model_config.final_dropout = config.student_final_dropout
-    student_model_config.mask_time_prob = config.student_mask_time_prob
-    student_model_config.mask_feature_prob = config.student_mask_feature_prob
-    student_model_config.mask_feature_length = config.student_mask_feature_length
-    student_model_config.layerdrop = config.student_layerdrop
-    student_model_config.ctc_loss_reduction = config.student_ctc_loss_reduction
+    student_model_config.activation_dropout = config.student.activation_dropout
+    student_model_config.attention_dropout = config.student.attention_dropout
+    student_model_config.hidden_dropout = config.student.hidden_dropout
+    student_model_config.feat_proj_dropout = config.student.feat_proj_dropout
+    student_model_config.final_dropout = config.student.final_dropout
+    student_model_config.mask_time_prob = config.student.mask_time_prob
+    student_model_config.mask_feature_prob = config.student.mask_feature_prob
+    student_model_config.mask_feature_length = config.student.mask_feature_length
+    student_model_config.layerdrop = config.student.layerdrop
+    student_model_config.ctc_loss_reduction = config.student.ctc_loss_reduction
 
     # Set parameters related to model distilling.
     # Check if `distill_factor` is positive, if so divide all model "height" parameters by `distill_factor`
     # if not use parameters from config.
-    if config.distill_factor > 0:
+    if config.student.distill_factor > 0:
         # Hidden layers
         student_model_config.num_hidden_layers = round(
-            teacher_model_config.num_hidden_layers / config.distill_factor
+            teacher_model_config.num_hidden_layers / config.student.distill_factor
         )
 
         # Attention heads
         student_model_config.num_attention_heads = round(
-            teacher_model_config.num_attention_heads / config.distill_factor
+            teacher_model_config.num_attention_heads / config.student.distill_factor
         )
 
         # Convolutional positional embedding groups
         student_model_config.num_conv_pos_embedding_groups = round(
-            teacher_model_config.num_conv_pos_embedding_groups / config.distill_factor
+            teacher_model_config.num_conv_pos_embedding_groups
+            / config.student.distill_factor
         )
 
         # If number of convolutional positional embeddings groups, or number of attention heads,
@@ -157,7 +147,9 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
             )
 
         # Convolutional layers in Time Delay Neural Networks
-        tdnn_len = round(len(teacher_model_config.tdnn_dim) / config.distill_factor)
+        tdnn_len = round(
+            len(teacher_model_config.tdnn_dim) / config.student.distill_factor
+        )
         # Convolutional layer dimensions
         # Take last entries from teacher
         student_model_config.tdnn_dim = teacher_model_config.tdnn_dim[(tdnn_len + 1) :]
@@ -170,14 +162,14 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
             :tdnn_len
         ]
     else:
-        student_model_config.num_hidden_layers = config.num_hidden_layers
-        student_model_config.num_attention_heads = config.num_attention_heads
+        student_model_config.num_hidden_layers = config.student.num_hidden_layers
+        student_model_config.num_attention_heads = config.student.num_attention_heads
         student_model_config.num_conv_pos_embedding_groups = (
-            config.num_conv_pos_embedding_groups
+            config.student.num_conv_pos_embedding_groups
         )
-        student_model_config.tdnn_dim = config.tdnn_dim
-        student_model_config.tdnn_kernel = config.tdnn_kernel
-        student_model_config.tdnn_dilation = config.tdnn_dilation
+        student_model_config.tdnn_dim = config.student.tdnn_dim
+        student_model_config.tdnn_kernel = config.student.tdnn_kernel
+        student_model_config.tdnn_dilation = config.student.tdnn_dilation
 
     # Check configs are valid
     assert all(
@@ -196,18 +188,18 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
 
     # Initialize models. Teacher model is initialized from a pretrained model.
     teacher_model = Wav2Vec2ForPreTraining.from_pretrained(
-        config.pretrained_teacher_model_id
+        config.models.pretrained_teacher_model_id
     ).to(device)
-    teacher_model.config.activation_dropout = config.teacher_activation_dropout
-    teacher_model.config.attention_dropout = config.teacher_attention_dropout
-    teacher_model.config.hidden_dropout = config.teacher_hidden_dropout
-    teacher_model.config.feat_proj_dropout = config.teacher_feat_proj_dropout
-    teacher_model.config.final_dropout = config.teacher_final_dropout
-    teacher_model.config.mask_time_prob = config.teacher_mask_time_prob
-    teacher_model.config.mask_feature_prob = config.teacher_mask_feature_prob
-    teacher_model.config.mask_feature_length = config.teacher_mask_feature_length
-    teacher_model.config.layerdrop = config.teacher_layerdrop
-    teacher_model.config.ctc_loss_reduction = config.teacher_ctc_loss_reduction
+    teacher_model.config.activation_dropout = config.teacher.activation_dropout
+    teacher_model.config.attention_dropout = config.teacher.attention_dropout
+    teacher_model.config.hidden_dropout = config.teacher.hidden_dropout
+    teacher_model.config.feat_proj_dropout = config.teacher.feat_proj_dropout
+    teacher_model.config.final_dropout = config.teacher.final_dropout
+    teacher_model.config.mask_time_prob = config.teacher.mask_time_prob
+    teacher_model.config.mask_feature_prob = config.teacher.mask_feature_prob
+    teacher_model.config.mask_feature_length = config.teacher.mask_feature_length
+    teacher_model.config.layerdrop = config.teacher.layerdrop
+    teacher_model.config.ctc_loss_reduction = config.teacher.ctc_loss_reduction
 
     # Student model is initialized with a random model, using the parameters defined above.
     student_model = Wav2Vec2ForPreTraining(student_model_config).to(device)
@@ -220,7 +212,7 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
     )
 
     # Activate gradient checkpointing if enabled
-    if config.gradient_checkpointing:
+    if config.training.gradient_checkpointing:
         student_model.gradient_checkpointing_enable()
 
     #### Define data collator, loaders, optimizer, loss function and scheduler
@@ -232,20 +224,20 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
         vectorized_dataset["train"],
         shuffle=True,
         collate_fn=data_collator,
-        batch_size=config.batch_size,
+        batch_size=config.training.batch_size,
     )
     eval_dataloader = DataLoader(
         vectorized_dataset["validation"],
         collate_fn=data_collator,
-        batch_size=config.batch_size,
+        batch_size=config.training.batch_size,
     )
 
     # Optimizer
     optimizer = AdamW(
         list(student_model.parameters()),
-        lr=config.learning_rate,
-        betas=[config.adam_beta1, config.adam_beta2],
-        eps=config.adam_epsilon,
+        lr=config.training.learning_rate,
+        betas=[config.training.adam_beta1, config.training.adam_beta2],
+        eps=config.training.adam_epsilon,
     )
 
     # Loss function
@@ -253,14 +245,14 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
 
     # Scheduler and math around the number of training steps.
     num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / config.gradient_accumulation_steps
+        len(train_dataloader) / config.training.gradient_accumulation_steps
     )
-    max_train_steps = config.epochs * num_update_steps_per_epoch
+    max_train_steps = config.training.epochs * num_update_steps_per_epoch
 
     lr_scheduler = get_scheduler(
-        name=config.lr_scheduler_type,
+        name=config.training.lr_scheduler_type,
         optimizer=optimizer,
-        num_warmup_steps=config.warmup_steps,
+        num_warmup_steps=config.training.warmup_steps,
         num_training_steps=max_train_steps,
     )
 
@@ -268,13 +260,18 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
 
     logging.info("***** Running training *****")
     logging.info(f"  Num examples = {len(vectorized_dataset['train'])}")
-    logging.info(f"  Num Epochs = {config.epochs}")
-    logging.info(f"  Instantaneous batch size per device = {config.batch_size}")
+    logging.info(f"  Num Epochs = {config.training.epochs}")
     logging.info(
-        f"  Gradient Accumulation steps = {config.gradient_accumulation_steps}"
+        f"  Instantaneous batch size per device = {config.training.batch_size}"
+    )
+    logging.info(
+        f"  Gradient Accumulation steps = {config.training.gradient_accumulation_steps}"
     )
     logging.info(f"  Total optimization steps = {max_train_steps}")
 
+    progress_bar = tqdm(range(max_train_steps))
+    completed_steps = 0
+    starting_epoch = 0
     completed_steps = 0
     starting_epoch = 0
     patience = 1
@@ -307,11 +304,11 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
             student_projected_states = student_outputs.projected_states
             loss = KD_loss(
                 input=functional.log_softmax(
-                    student_projected_states / config.softmax_temperature,
+                    student_projected_states / config.training.softmax_temperature,
                     dim=-1,
                 ),
                 target=functional.softmax(
-                    teacher_projected_states / config.softmax_temperature,
+                    teacher_projected_states / config.training.softmax_temperature,
                     dim=-1,
                 ),
             )
@@ -333,10 +330,10 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
 
         # Early stopping
         early_stop = False
-        if config.early_stopping:
-            if val_logs["val_loss"] > current_best_val_logs["val_loss"]:    
+        if config.training.early_stopping:
+            if val_logs["val_loss"] > current_best_val_logs["val_loss"]:
                 patience += 1
-                if patience >= config.early_stopping_patience:
+                if patience >= config.training.early_stopping_patience:
                     early_stop = True
                     return current_best_val_logs, early_stop, patience
             else:
@@ -344,7 +341,7 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
         return val_logs, early_stop, patience
 
     #### Training loop
-    for epoch in range(starting_epoch, config.epochs):
+    for epoch in range(starting_epoch, config.training.epochs):
         student_model.train()
         teacher_model.eval()
         for step, batch in enumerate(train_dataloader):
@@ -372,18 +369,22 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
             #### Calculate (Kullback-Leibler divergence) loss
             loss = KD_loss(
                 input=functional.log_softmax(
-                    student_projected_states / config.softmax_temperature, dim=-1
+                    student_projected_states / config.training.softmax_temperature,
+                    dim=-1,
                 ),
                 target=functional.softmax(
-                    teacher_projected_states / config.softmax_temperature, dim=-1
+                    teacher_projected_states / config.training.softmax_temperature,
+                    dim=-1,
                 ),
             )
             # divide loss by gradient accumulation steps since gradients
             # are accumulated for multiple backward passes in PyTorch
-            loss = loss / config.gradient_accumulation_steps
+            loss = loss / config.training.gradient_accumulation_steps
             loss.backward()
 
-            if (step + 1) % config.gradient_accumulation_steps == 0 or step == len(
+            if (
+                step + 1
+            ) % config.training.gradient_accumulation_steps == 0 or step == len(
                 train_dataloader
             ) - 1:
 
@@ -396,11 +397,13 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
 
             #### Log all results
             if (step + 1) % (
-                config.gradient_accumulation_steps * config.logging_steps
+                config.training.gradient_accumulation_steps
+                * config.training.logging_steps
             ) == 0:
                 loss.detach()
                 train_logs = {
-                    "loss": (loss * config.gradient_accumulation_steps) / num_losses,
+                    "loss": (loss * config.training.gradient_accumulation_steps)
+                    / num_losses,
                     "constrast_loss_diff": (
                         teacher_outputs.contrastive_loss
                         - student_outputs.contrastive_loss
@@ -425,7 +428,7 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
 
             #### Eval model
             if (step + 1) % (
-                config.gradient_accumulation_steps * config.eval_steps
+                config.training.gradient_accumulation_steps * config.training.eval_steps
             ) == 0:
                 current_best_val_logs, early_stop, patience = evaluate(
                     batch, current_best_val_logs, patience
@@ -434,11 +437,15 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
                 # Saving new best model
                 if patience == 0 and not early_stop:
                     if (
-                        config.push_to_hub and epoch < config.epochs - 1
+                        config.training.push_to_hub
+                        and epoch < config.training.epochs - 1
                     ) or save_dir is not None:
                         student_model.save_pretrained(save_dir)
 
-                    if config.push_to_hub and epoch < config.epochs - 1:
+                    if (
+                        config.training.push_to_hub
+                        and epoch < config.training.epochs - 1
+                    ):
                         repo.push_to_hub(
                             commit_message=f"Training in progress step {completed_steps}. New best model.",
                             blocking=False,
@@ -446,22 +453,24 @@ def train(config: Optional[Union[dict, Config]] = None, **kwargs):
                         )
                     logging.info("Saved model new best model...")
                 if early_stop:
-                    logging.info("Stopping training, early stopping patience ran out...")
+                    logging.info(
+                        "Stopping training, early stopping patience ran out..."
+                    )
                     break
 
         # Always evaluate at end of epoch
         current_best_val_logs, early_stop, patience = evaluate(
             batch, current_best_val_logs, patience
         )
-        if config.output_dir is not None:
+        if config.training.output_dir is not None:
             student_model.save_pretrained(save_dir)
 
-            if config.push_to_hub:
+            if config.training.push_to_hub:
                 repo.push_to_hub(
-                    commit_message="End of epoch",
+                    commit_message=f"End of epoch {epoch}",
                     auto_lfs_prune=True,
                 )
-            logging.info("Saved model, at end of epoch...")
+            logging.info(f"Saved model, at end of epoch {epoch}...")
 
 
 def count_parameters(model):
@@ -477,12 +486,4 @@ def count_parameters(model):
 
 
 if __name__ == "__main__":
-
-    xlsr_300m_config = Config(
-        dataset_id="google/fleurs",
-        dataset_subset="da_dk",
-        pretrained_teacher_model_id="facebook/wav2vec2-xls-r-300m",
-        distilled_model_id="ajders/distilled_wav2vec2_xls_r_300m",
-    )
-
-    train(xlsr_300m_config)
+    train()

@@ -1,0 +1,131 @@
+#Hydra config.
+# pretrained_model_id (str):
+#     The model id of the pretrained model to finetune.
+# distilled_model_id (str):
+#     The model id of the distilled model.
+# hub_token (str):
+#     Token for use of HF repo
+# dataset_id (str):
+#     The id of the dataset to finetune on.
+# dataset_subset (str or None, optional):
+#     The subset of the dataset to finetune on. If None then no subset
+#     will be used. Defaults to 'da'.
+# sampling_rate (int, optional):
+#     The sample rate of the audio files. Defaults to 16_000.
+# train_name (str, optional):
+#     The name of the train dataset. Defaults to 'train'.
+# num_train (int):
+#     The number of entries to use for training.
+# validation_name (str or None, optional):
+#     The name of the validation dataset. If None then a validation set
+#     will be created from the train dataset. Defaults to 'validation'.
+# num_val (int):
+#     The number of entries to use for validation.
+# test_name (str or None, optional):
+#     The name of the test dataset. If None then the validation set will
+#     be used as a test set and a new validation set will be created from
+#     the train dataset. If a validation set is not available either,
+#     then both a validation and test set will be created from the train
+#     dataset. Defaults to 'test'.
+# num_test (int):
+#     The number of entries to use for test.
+# audio_column_name (str, optional):
+#     The name of the column in the dataset containing the audio data.
+#     Defaults to 'audio'
+# max_duration_in_seconds (int, optional):
+#     The maximum length of audio clips in seconds. Defaults to 25.
+# min_duration_in_seconds (int, optional):
+#     The minimum length of audio clips in seconds. Defaults to 0.
+# preprocessing_num_workers (int, optional):
+#     Number of workers used in multiprocessing of preprocessing.
+#     Defaults to number of cpus.
+# seed (int):
+#     Seed for random generation.
+# output_dir (str):
+#     Specifies local folder in which to save model.
+# batch_size (int, optional):
+#     The batch size for training. Defaults to 4.
+# gradient_accumulation_steps (int, optional):
+#     The number of steps to accumulate gradients for. Defaults to 8.
+# gradient_checkpointing (bool):
+#     Wether or not to use gradient checkpointing. Useful for few GPUs.
+# epochs (int, optional):
+#     The number of epochs to train for. Defaults to 500.
+# learning_rate (float, optional):
+#     The learning rate for the optimizer. Defaults to 4e-5.
+# lr_scheduler_type (str):
+#     Which schedule the learning rate decline should follow.
+# adam_beta1 (float):
+#     beta_1 parameter for Adam optimizer
+# adam_beta2 (float):
+#     beta_2 parameter for Adam optimizer
+# adam_epsilon (float):
+#     epsilon parameter for Adam optimizer
+# softmax_temperature (float):
+#     Smoothing factor of softmax calculation in loss function.
+# warmup_steps (int, optional):
+#     The number of warmup steps for the learning rate scheduler.
+#     Defaults to 500.
+# logging_steps (int, optional):
+#     The number of warmup steps for the learning rate scheduler.
+#     Defaults to 500.
+# saving_steps (int, optional):
+#     The number of warmup steps for the learning rate scheduler.
+#     Defaults to 500.
+# eval_steps (int, optional):
+#     The number of warmup steps for the learning rate scheduler.
+#     Defaults to 500.
+# early_stopping (bool, optional):
+#     Whether to use early stopping. Defaults to True.
+# early_stopping_patience (int, optional):
+#     The patience for early stopping. Only relevant if `early_stopping`
+#     is True. Defaults to 5.
+# push_to_hub (bool, optional):
+#     Whether to push the model to the hub. Defaults to True.
+  
+
+defaults:
+  - student: student
+  - teacher: teacher
+  - _self_
+
+data:
+  dataset_id: google/fleurs
+  dataset_subset: da_dk
+  sampling_rate: 16_000
+  train_name: train
+  num_train: 10
+  validation_name: validation
+  num_val: 10
+  test_name: test
+  num_test: 10
+  audio_column_name: audio
+  max_duration_in_seconds: 25
+  min_duration_in_seconds: 0
+  preprocessing_num_workers: -1
+
+models:
+  pretrained_teacher_model_id: facebook/wav2vec2-xls-r-300m
+  distilled_model_id: ajders/distilled_wav2vec2_xls_r_300m
+  hub_token: None
+
+training:
+  seed: 703
+  output_dir: "models"
+  batch_size: 1
+  gradient_accumulation_steps: 128
+  gradient_checkpointing: True
+  epochs: 500
+  learning_rate: 0.00004
+  lr_scheduler_type: linear
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_epsilon: 1e-8
+  softmax_temperature: 2.0
+  warmup_steps: 500
+  logging_steps: 5000
+  eval_steps: 5000
+  early_stopping: True
+  early_stopping_patience: 5
+  push_to_hub: True
+  pad_to_multiple_of: 32

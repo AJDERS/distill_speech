@@ -50,6 +50,9 @@ class AudioDataset:
         max_duration_in_seconds: int = 25,
         min_duration_in_seconds: int = 0,
         preprocessing_num_workers: int = -1,
+        num_train: int = None,
+        num_test: int = None,
+        num_val: int = None,
     ):
         self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(
             pretrained_teacher_model_id
@@ -60,6 +63,9 @@ class AudioDataset:
         self.train_name = train_name
         self.validation_name = validation_name
         self.test_name = test_name
+        self.num_train = num_train
+        self.num_test = num_test
+        self.num_val = num_val
         self.audio_column_name = audio_column_name
         self.max_duration_in_seconds = max_duration_in_seconds
         self.min_duration_in_seconds = min_duration_in_seconds
@@ -156,10 +162,22 @@ class AudioDataset:
             split_dict = val_test.train_test_split(test_size=0.5, seed=703)
             val = split_dict["train"]
             test = split_dict["test"]
+
         self.raw_datasets = DatasetDict()
-        self.raw_datasets["train"] = train
-        self.raw_datasets["test"] = test
-        self.raw_datasets["validation"] = val
+        if self.num_train is not None:
+            self.raw_datasets["train"] = Dataset.from_dict(train[:self.num_train])
+        else:
+            self.raw_datasets["train"] = train
+
+        if self.num_test is not None:
+            self.raw_datasets["test"] = Dataset.from_dict(test[:self.num_test])
+        else:
+            self.raw_datasets["test"] = test
+
+        if self.num_val is not None:
+            self.raw_datasets["validation"] = Dataset.from_dict(train[:self.num_val])
+        else:
+            self.raw_datasets["validation"] = val
 
     def process(self) -> Dataset:
         """Preprocesses audio data. Casts audio column as `Audio`-tensor and down samples to
@@ -205,7 +223,9 @@ class AudioDataset:
             prepare_batch,
             num_proc=self.preprocessing_num_workers,
             remove_columns=self.raw_datasets["train"].column_names,
+            load_from_cache_file=False
         )
+        vectorized_datasets.cleanup_cache_files()
 
         if min_length > 0:
             vectorized_datasets = vectorized_datasets.filter(
