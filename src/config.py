@@ -195,9 +195,9 @@ class Config(BaseModel):
     adam_epsilon: float = 1e-8
     softmax_temperature: float = 2.0
     warmup_steps: int = 500
-    logging_steps: int = 5000
-    eval_steps: int = 5000
+    logging_steps: int = 500
+    eval_steps: int = 1000
     early_stopping: bool = True
-    early_stopping_patience: int = 5
+    early_stopping_patience: int = 10
     push_to_hub: bool = True
     pad_to_multiple_of: int = 32
