@@ -74,6 +74,9 @@ def train(config: DictConfig, **kwargs):
         max_duration_in_seconds=config.data.max_duration_in_seconds,
         min_duration_in_seconds=config.data.min_duration_in_seconds,
         preprocessing_num_workers=config.data.preprocessing_num_workers,
+        num_train=config.data.num_train,
+        num_test=config.data.num_test,
+        num_val=config.data.num_val,
     )
     vectorized_dataset = dataset.process()
 
@@ -459,7 +462,7 @@ def train(config: DictConfig, **kwargs):
         current_best_val_logs, early_stop, patience = evaluate(
             batch, current_best_val_logs, patience
         )
-        if config.output_dir is not None:
+        if config.training.output_dir is not None:
             student_model.save_pretrained(save_dir)
 
             if config.training.push_to_hub:

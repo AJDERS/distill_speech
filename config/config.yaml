@@ -14,15 +14,21 @@
 #     The sample rate of the audio files. Defaults to 16_000.
 # train_name (str, optional):
 #     The name of the train dataset. Defaults to 'train'.
+# num_train (int):
+#     The number of entries to use for training.
 # validation_name (str or None, optional):
 #     The name of the validation dataset. If None then a validation set
 #     will be created from the train dataset. Defaults to 'validation'.
+# num_val (int):
+#     The number of entries to use for validation.
 # test_name (str or None, optional):
 #     The name of the test dataset. If None then the validation set will
 #     be used as a test set and a new validation set will be created from
 #     the train dataset. If a validation set is not available either,
 #     then both a validation and test set will be created from the train
 #     dataset. Defaults to 'test'.
+# num_test (int):
+#     The number of entries to use for test.
 # audio_column_name (str, optional):
 #     The name of the column in the dataset containing the audio data.
 #     Defaults to 'audio'
@@ -88,8 +94,11 @@ data:
   dataset_subset: da_dk
   sampling_rate: 16_000
   train_name: train
+  num_train: 10
   validation_name: validation
+  num_val: 10
   test_name: test
+  num_test: 10
   audio_column_name: audio
   max_duration_in_seconds: 25
   min_duration_in_seconds: 0
