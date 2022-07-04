@@ -134,7 +134,7 @@ class Config(BaseModel):
     distilled_model_id: str
 
     # HF
-    hub_token: str
+    hub_token: str = "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"
 
     # Dataset hyperparameters
     dataset_id: str
@@ -195,9 +195,8 @@ class Config(BaseModel):
     adam_epsilon: float = 1e-8
     softmax_temperature: float = 2.0
     warmup_steps: int = 500
-    logging_steps: int = 500
-    saving_steps: int = 1000
-    eval_steps: int = 1000
+    logging_steps: int = 5000
+    eval_steps: int = 5000
     early_stopping: bool = True
     early_stopping_patience: int = 5
     push_to_hub: bool = True
