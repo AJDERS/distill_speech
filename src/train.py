@@ -146,45 +146,12 @@ def train(config: DictConfig, **kwargs):
                 possible_results, key=lambda z: abs(n_heads - 2**z)
             )
 
-        # Convolutional layers in Time Delay Neural Networks
-        tdnn_len = round(
-            len(teacher_model_config.tdnn_dim) / config.student.distill_factor
-        )
-        # Convolutional layer dimensions
-        # Take last entries from teacher
-        student_model_config.tdnn_dim = teacher_model_config.tdnn_dim[(tdnn_len + 1) :]
-        # Convolutional layer kernel sizes
-        # Take first entries from teacher
-        student_model_config.tdnn_kernel = teacher_model_config.tdnn_kernel[:tdnn_len]
-        # Convolutional layer time dilation
-        # Take first entries from teacher
-        student_model_config.tdnn_dilation = teacher_model_config.tdnn_dilation[
-            :tdnn_len
-        ]
     else:
         student_model_config.num_hidden_layers = config.student.num_hidden_layers
         student_model_config.num_attention_heads = config.student.num_attention_heads
         student_model_config.num_conv_pos_embedding_groups = (
             config.student.num_conv_pos_embedding_groups
         )
-        student_model_config.tdnn_dim = config.student.tdnn_dim
-        student_model_config.tdnn_kernel = config.student.tdnn_kernel
-        student_model_config.tdnn_dilation = config.student.tdnn_dilation
-
-    # Check configs are valid
-    assert all(
-        [
-            len(student_model_config.tdnn_dim) == len(x)
-            for x in [
-                student_model_config.tdnn_dilation,
-                student_model_config.tdnn_kernel,
-            ]
-        ]
-    ), (
-        f"tdnn_dim: {len(student_model_config.tdnn_dim)}, "
-        + f"tdnn_dilation: {len(student_model_config.tdnn_dilation)}, "
-        + f"tdnn_kernel: {len(student_model_config.tdnn_kernel)}, "
-    )
 
     # Initialize models. Teacher model is initialized from a pretrained model.
     teacher_model = Wav2Vec2ForPreTraining.from_pretrained(
