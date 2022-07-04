@@ -1,11 +1,11 @@
 # Teacher Model hyperparameters
-teacher_activation_dropout: 0.1
-teacher_attention_dropout: 0.1
-teacher_hidden_dropout: 0.1
-teacher_feat_proj_dropout: 0.1
-teacher_final_dropout: 0.1
-teacher_mask_time_prob: 0.075
-teacher_mask_feature_prob: 0.075
-teacher_mask_feature_length: 10
-teacher_layerdrop: 0.1
-teacher_ctc_loss_reduction: sum
+activation_dropout: 0.1
+attention_dropout: 0.1
+hidden_dropout: 0.1
+feat_proj_dropout: 0.1
+final_dropout: 0.1
+mask_time_prob: 0.075
+mask_feature_prob: 0.075
+mask_feature_length: 10
+layerdrop: 0.1
+ctc_loss_reduction: sum

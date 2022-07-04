@@ -6,13 +6,13 @@ num_conv_pos_embedding_groups: 8  # Only necessary if `distill_factor` > 0
 tdnn_dim: (512, 512, 1500)  # Only necessary if `distill_factor` > 0
 tdnn_kernel: (5, 3, 3)  # Only necessary if `distill_factor` > 0
 tdnn_dilation: (1, 2, 3)  # Only necessary if `distill_factor` > 0
-student_activation_dropout: 0.1
-student_attention_dropout: 0.1
-student_hidden_dropout: 0.1
-student_feat_proj_dropout: 0.1
-student_final_dropout: 0.1
-student_mask_time_prob: 0.075
-student_mask_feature_prob: 0.075
-student_mask_feature_length: 10
-student_layerdrop: 0.1
-student_ctc_loss_reduction: sum
+activation_dropout: 0.1
+attention_dropout: 0.1
+hidden_dropout: 0.1
+feat_proj_dropout: 0.1
+final_dropout: 0.1
+mask_time_prob: 0.075
+mask_feature_prob: 0.075
+mask_feature_length: 10
+layerdrop: 0.1
+ctc_loss_reduction: sum
