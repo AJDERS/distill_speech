@@ -1,4 +1,46 @@
 # Student Model hyperparameters
+# activation_dropout (float, optional):
+#     The dropout rate for the activation layer. 
+# attention_dropout (float, optional):
+#     The dropout rate for the attention layer. 
+# hidden_dropout (float, optional):
+#     The dropout rate for the hidden layer. 
+# feat_proj_dropout (float, optional):
+#     The dropout rate for the feature projection layer. 
+# final_dropout (float, optional):
+#     The dropout rate for the final layer. 
+# mask_time_prob (float, optional):
+#     The probability of masking the time dimension. 
+# mask_feature_prob (float, optional):
+#     The probability of masking the feature dimension. 
+# mask_feature_length (int, optional):
+#     The length of the masking of the feature dimension. 
+# layerdrop (float, optional):
+#     The dropout rate for the layers. 
+# ctc_loss_reduction (str, optional):
+#     The reduction to use for the CTC loss. 
+# distill_factor (int):
+#     By how many factors we reduce height parameters from teacher to obtain
+#     student parameters.
+# num_hidden_layers (int):
+#     Number of hidden layers in the Transformer encoder.
+# num_attention_heads (int):
+#     Number of attention heads for each attention layer in the Transformer encoder.
+# num_conv_pos_embedding_groups (int):
+#     Number of groups of 1D convolutional positional embeddings layer.
+# tdnn_dim (tuple):
+#     A tuple of integers defining the number of output channels of each 1D
+#     convolutional layer in the TDNN module of the XVector model. The length
+#     of tdnn_dim defines the number of TDNN layers.
+# tdnn_kernel (tuple):
+#     A tuple of integers defining the kernel size of each 1D convolutional
+#     layer in the TDNN module of the XVector model. The length of tdnn_kernel
+#     has to match the length of tdnn_dim.
+# tdnn_dilation (tuple):
+#     A tuple of integers defining the dilation factor of each 1D convolutional
+#     layer in TDNN module of the XVector model. The length of tdnn_dilation has
+#     to match the length of tdnn_dim.
+
 distill_factor: 3  # tested, -1, 1, 2, 3
 num_hidden_layers: 12  # Only necessary if `distill_factor` > 0
 num_attention_heads: 8  # Only necessary if `distill_factor` > 0, must divide `embed_dim`
