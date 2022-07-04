@@ -1,6 +1,9 @@
 # VScode
 .vscode
 
+# Hydra outputs
+outputs/*
+
 # Data
 data/*
 
