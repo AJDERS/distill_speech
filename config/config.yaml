@@ -1,0 +1,41 @@
+defaults:
+  - pretrained_teacher_model_id: facebook/wav2vec2-xls-r-300m
+  - distilled_model_id: ajders/distilled_wav2vec2_xls_r_300m
+  - _self_
+
+data:
+  dataset_id: google/fleurs
+  dataset_subset: data/processed
+  sampling_rate: 16_000
+  train_name: train
+  validation_name: validation
+  test_name: test
+  audio_column_name: audio
+  max_duration_in_seconds: 25
+  min_duration_in_seconds: 0
+  preprocessing_num_workers: -1
+
+models:
+  student: student
+  teacher: teacher
+
+training:
+  seed: 703
+  output_dir: "models"
+  batch_size: 1
+  gradient_accumulation_steps: 128
+  gradient_checkpointing: True
+  epochs: 500
+  learning_rate: 0.00004
+  lr_scheduler_type: linear
+  adam_beta1: 0.9
+  adam_beta2: 0.999
+  adam_epsilon: 1e-8
+  softmax_temperature: 2.0
+  warmup_steps: 500
+  logging_steps: 5000
+  eval_steps: 5000
+  early_stopping: True
+  early_stopping_patience: 5
+  push_to_hub: True
+  pad_to_multiple_of: 32
