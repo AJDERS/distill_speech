@@ -8,6 +8,7 @@ from numpy import Inf
 from tqdm import tqdm
 from torch.optim import AdamW
 from data import AudioDataset
+from accelerate import Accelerator
 from omegaconf import DictConfig
 from math import log, ceil, floor
 from prettytable import PrettyTable
@@ -41,28 +42,34 @@ def train(config: DictConfig, **kwargs):
     logging.info(f"GPU availability: {torch.cuda.is_available()}")
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
+    # Initialize the accelerator.
+    accelerator = Accelerator()
+
     #### Set training seed.
     if config.training.seed is not None:
         set_seed(config.training.seed)
 
     #### Create HF epository
-    if config.training.output_dir is not None:
-        save_dir = os.path.join(
-            config.training.output_dir,
-            f"{config.models.pretrained_teacher_model_id}_{config.data.dataset_id}",
-        )
-    if config.training.push_to_hub:
-        if config.models.distilled_model_id is None:
-            if config.models.hub_token != "None":
-                repo_name = get_full_repo_name(save_dir, token=config.models.hub_token)
-        else:
-            repo_name = config.models.distilled_model_id
-        repo = Repository(save_dir, clone_from=repo_name)
-    elif config.training.output_dir is not None:
-        os.makedirs(save_dir, exist_ok=True)
+    if accelerator.is_main_process:
+        if config.training.output_dir is not None:
+            save_dir = os.path.join(
+                config.training.output_dir,
+                f"{config.models.pretrained_teacher_model_id}_{config.data.dataset_id}",
+            )
+        if config.training.push_to_hub:
+            if config.models.distilled_model_id is None:
+                if config.models.hub_token != "None":
+                    repo_name = get_full_repo_name(save_dir, token=config.models.hub_token)
+            else:
+                repo_name = config.models.distilled_model_id
+            repo = Repository(save_dir, clone_from=repo_name)
+        elif config.training.output_dir is not None:
+            os.makedirs(save_dir, exist_ok=True)
+    accelerator.wait_for_everyone()
 
     #### Load dataset
     dataset = AudioDataset(
+        accelerator=accelerator,
         pretrained_teacher_model_id=config.models.pretrained_teacher_model_id,
         dataset_id=config.data.dataset_id,
         dataset_subset=config.data.dataset_subset,
@@ -208,6 +215,11 @@ def train(config: DictConfig, **kwargs):
         eps=config.training.adam_epsilon,
     )
 
+    # Prepare everything with our `accelerator`.
+    student_model, teacher_model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
+        student_model, teacher_model, optimizer, train_dataloader, eval_dataloader
+    )
+
     # Loss function
     KD_loss = torch.nn.KLDivLoss(reduction="batchmean")
 
@@ -225,6 +237,8 @@ def train(config: DictConfig, **kwargs):
     )
 
     #### Train
+    total_batch_size = config.training.batch_size * accelerator.num_processes * config.training.gradient_accumulation_steps
+
 
     logging.info("***** Running training *****")
     logging.info(f"  Num examples = {len(vectorized_dataset['train'])}")
@@ -232,20 +246,16 @@ def train(config: DictConfig, **kwargs):
     logging.info(
         f"  Instantaneous batch size per device = {config.training.batch_size}"
     )
+    logging.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
     logging.info(
         f"  Gradient Accumulation steps = {config.training.gradient_accumulation_steps}"
     )
     logging.info(f"  Total optimization steps = {max_train_steps}")
 
-    progress_bar = tqdm(range(max_train_steps))
-    completed_steps = 0
-    starting_epoch = 0
+    progress_bar = tqdm(range(max_train_steps), disable=not accelerator.is_local_main_process)
     completed_steps = 0
     starting_epoch = 0
     patience = 1
-    progress_bar = tqdm(range(max_train_steps))
-    completed_steps = 0
-    starting_epoch = 0
     current_best_val_logs = {
         "val_loss": Inf,
         "val_contrastive_loss_diff": Inf,
