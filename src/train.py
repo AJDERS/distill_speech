@@ -40,7 +40,6 @@ def train(config: DictConfig, **kwargs):
     """
     #### Check if GPU is available
     logging.info(f"GPU availability: {torch.cuda.is_available()}")
-    device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
 
     # Initialize the accelerator.
     accelerator = Accelerator()
@@ -164,7 +163,7 @@ def train(config: DictConfig, **kwargs):
     # Initialize models. Teacher model is initialized from a pretrained model.
     teacher_model = Wav2Vec2ForPreTraining.from_pretrained(
         config.models.pretrained_teacher_model_id
-    ).to(device)
+    )
     teacher_model.config.activation_dropout = config.teacher.activation_dropout
     teacher_model.config.attention_dropout = config.teacher.attention_dropout
     teacher_model.config.hidden_dropout = config.teacher.hidden_dropout
@@ -177,7 +176,7 @@ def train(config: DictConfig, **kwargs):
     teacher_model.config.ctc_loss_reduction = config.teacher.ctc_loss_reduction
 
     # Student model is initialized with a random model, using the parameters defined above.
-    student_model = Wav2Vec2ForPreTraining(student_model_config).to(device)
+    student_model = Wav2Vec2ForPreTraining(student_model_config)
     t_total_params, t_table = count_parameters(teacher_model)
     s_total_params, s_table = count_parameters(student_model)
     logging.info(f"  Teacher summary: \n {t_table}")
@@ -192,7 +191,7 @@ def train(config: DictConfig, **kwargs):
 
     #### Define data collator, loaders, optimizer, loss function and scheduler
     data_collator = DataCollatorForWav2Vec2Pretraining(
-        model=teacher_model, feature_extractor=dataset.feature_extractor, device=device
+        model=teacher_model, feature_extractor=dataset.feature_extractor
     )
 
     train_dataloader = DataLoader(
@@ -358,7 +357,17 @@ def train(config: DictConfig, **kwargs):
             # divide loss by gradient accumulation steps since gradients
             # are accumulated for multiple backward passes in PyTorch
             loss = loss / config.training.gradient_accumulation_steps
-            loss.backward()
+            accelerator.backward(loss)
+
+            # make sure that `num_losses` is summed for distributed training
+            # and average gradients over losses of all devices
+            if accelerator.state.num_processes > 1:
+                num_losses = accelerator.gather(num_losses).sum()
+                gradient_multiplier = accelerator.state.num_processes / num_losses
+                multiply_grads(student_model.module.parameters(), gradient_multiplier)
+            else:
+                multiply_grads(student_model.parameters(), 1 / num_losses)
+
 
             if (
                 step + 1
@@ -461,6 +470,14 @@ def count_parameters(model):
         table.add_row([name, params])
         total_params += params
     return total_params, table
+
+def multiply_grads(params, c):
+    """Multiplies grads by a constant *c*."""
+    for p in params:
+        if p.grad is not None:
+            if torch.is_tensor(c):
+                c = c.to(p.grad.device)
+            p.grad.data.mul_(c)
 
 
 if __name__ == "__main__":
