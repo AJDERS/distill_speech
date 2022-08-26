@@ -80,9 +80,9 @@ def train(config: DictConfig, **kwargs):
         max_duration_in_seconds=config.data.max_duration_in_seconds,
         min_duration_in_seconds=config.data.min_duration_in_seconds,
         preprocessing_num_workers=config.data.preprocessing_num_workers,
-        num_train=config.data.num_train,
-        num_test=config.data.num_test,
-        num_val=config.data.num_val,
+        num_train=None if config.data.num_train == -1 else config.data.num_train,
+        num_test=None if config.data.num_test == -1 else config.data.num_test,
+        num_val=None if config.data.num_val == -1 else config.data.num_val,
         use_cached=config.data.use_cached,
     )
     vectorized_dataset = dataset.process()
@@ -298,12 +298,20 @@ def train(config: DictConfig, **kwargs):
             )
             val_logs["val_num_losses"] += batch["mask_time_indices"].sum()
 
+        # sum over devices in multi-processing
+        if accelerator.num_processes > 1:
+            val_logs = {k: accelerator.gather(v).sum() for k, v in val_logs.items()}
+
         # Make validation logs, and write to log.
         val_logs = {k: v / val_logs["val_num_losses"] for k, v in val_logs.items()}
+
         log_str = ""
         for k, v in val_logs.items():
             log_str += "| {}: {:.3e}".format(k, v.item())
         logging.info(log_str)
+
+        if accelerator.is_local_main_process:
+            progress_bar.write(log_str)
 
         # Early stopping
         early_stop = False
@@ -368,19 +376,35 @@ def train(config: DictConfig, **kwargs):
             else:
                 multiply_grads(student_model.parameters(), 1 / num_losses)
 
-
+            # update parameters
             if (
                 step + 1
             ) % config.training.gradient_accumulation_steps == 0 or step == len(
                 train_dataloader
             ) - 1:
 
-                # update parameters
-                optimizer.step()
-                optimizer.zero_grad()
-                lr_scheduler.step()
+                # compute grad norm for monitoring
+                scale = (
+                    accelerator.scaler._scale.item()
+                    if hasattr(accelerator, "scaler") and accelerator.scaler is not None
+                    else 1
+                )
+                if accelerator.state.num_processes > 1:
+                    grad_norm = get_grad_norm(student_model.module.parameters(), scale)
+                else:
+                    grad_norm = get_grad_norm(student_model.parameters(), scale)
+
+                if not accelerator.optimizer_step_was_skipped:
+                    lr_scheduler.step()
+                elif accelerator.is_local_main_process:
+                    progress_bar.write(
+                        f"Gradients have overflown - skipping update step... Updating gradient scale to {scale}..."
+                    )
+
                 progress_bar.update(1)
                 completed_steps += 1
+                optimizer.step()
+                optimizer.zero_grad()
 
             #### Log all results
             if (step + 1) % (
@@ -388,6 +412,14 @@ def train(config: DictConfig, **kwargs):
                 * config.training.logging_steps
             ) == 0:
                 loss.detach()
+
+                if accelerator.state.num_processes > 1:
+                    loss = accelerator.gather(loss).sum()
+                    teacher_outputs.contrastive_loss = accelerator.gather(teacher_outputs.contrastive_loss).sum()
+                    student_outputs.diversity_loss = accelerator.gather(student_outputs.diversity_loss).sum()
+                    percent_masked = accelerator.gather(percent_masked).sum()
+
+
                 train_logs = {
                     "loss": (loss * config.training.gradient_accumulation_steps)
                     / num_losses,
@@ -407,11 +439,15 @@ def train(config: DictConfig, **kwargs):
                         - student_outputs.codevector_perplexity
                     ),
                     "lr": torch.tensor(optimizer.param_groups[0]["lr"]),
+                    "grad_norm": torch.tensor(grad_norm),
                 }
                 log_str = ""
                 for k, v in train_logs.items():
                     log_str += "| {}: {:.3e}".format(k, v.item())
                 logging.info(log_str)
+
+                if accelerator.is_local_main_process:
+                    progress_bar.write(log_str)
 
             #### Eval model
             if (step + 1) % (
@@ -420,19 +456,25 @@ def train(config: DictConfig, **kwargs):
                 current_best_val_logs, early_stop, patience = evaluate(
                     batch, current_best_val_logs, patience
                 )
-
+                accelerator.wait_for_everyone()
+                unwrapped_student_model = accelerator.unwrap_model(student_model)
                 # Saving new best model
                 if patience == 0 and not early_stop:
                     if (
                         config.training.push_to_hub
                         and epoch < config.training.epochs - 1
                     ) or save_dir is not None:
-                        student_model.save_pretrained(save_dir)
+                        unwrapped_student_model.save_pretrained(
+                            save_dir,
+                            is_main_process=accelerator.is_main_process,
+                            save_function=accelerator.save
+                        )
+                        unwrapped_student_model.save_pretrained(save_dir)
 
                     if (
                         config.training.push_to_hub
                         and epoch < config.training.epochs - 1
-                    ):
+                    ) and accelerator.is_main_process:
                         repo.push_to_hub(
                             commit_message=f"Training in progress step {completed_steps}. New best model.",
                             blocking=False,
@@ -479,6 +521,15 @@ def multiply_grads(params, c):
                 c = c.to(p.grad.device)
             p.grad.data.mul_(c)
 
+def get_grad_norm(params, scale=1):
+    """Compute grad norm given a gradient scale."""
+    total_norm = 0.0
+    for p in params:
+        if p.grad is not None:
+            param_norm = (p.grad.detach().data / scale).norm(2)
+            total_norm += param_norm.item() ** 2
+    total_norm = total_norm**0.5
+    return total_norm
 
 if __name__ == "__main__":
     train()
