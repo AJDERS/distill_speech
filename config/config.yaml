@@ -95,19 +95,19 @@ data:
   sampling_rate: 16_000
   use_cached: False
   train_name: train
-  num_train: None
+  num_train: -1
   validation_name: validation
-  num_val: None
+  num_val: -1
   test_name: test
-  num_test: None
+  num_test: -1
   audio_column_name: audio
   max_duration_in_seconds: 25
   min_duration_in_seconds: 0
   preprocessing_num_workers: -1
 
 models:
-  pretrained_teacher_model_id: facebook/wav2vec2-xls-r-300m
-  distilled_model_id: ajders/distilled_wav2vec2_xls_r_300m
+  pretrained_teacher_model_id: chcaa/xls-r-300m-danish
+  distilled_model_id: ajders/distilled-xls-r-300m-danish
   hub_token: None
 
 training:

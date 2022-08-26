@@ -7,11 +7,13 @@ from datasets import (
 )
 from datasets.features import Audio
 from transformers import Wav2Vec2FeatureExtractor
-
+from accelerate import Accelerator
 
 class AudioDataset:
     """A dataset containing audio data.
     Args:
+        accelerator (Accelerator):
+            The accelerator to use.
         dataset_id (str, optional):
             The HF dataset id. Defaults to
             'mozilla-foundation/common_voice_8_0'.
@@ -47,6 +49,7 @@ class AudioDataset:
 
     def __init__(
         self,
+        accelerator: Accelerator,
         pretrained_teacher_model_id: str,
         dataset_id: str = "google/fleurs",
         dataset_subset: Optional[str] = "da_dk",
@@ -63,6 +66,7 @@ class AudioDataset:
         num_val: int = None,
         use_cached: bool = False,
     ):
+        self.accelerator = accelerator
         self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(
             pretrained_teacher_model_id
         )
@@ -228,21 +232,21 @@ class AudioDataset:
             import multiprocessing
 
             self.preprocessing_num_workers = multiprocessing.cpu_count()
-
-        vectorized_datasets = self.raw_datasets.map(
-            prepare_batch,
-            num_proc=self.preprocessing_num_workers,
-            remove_columns=self.raw_datasets["train"].column_names,
-            load_from_cache_file=self.use_cached
-        )
-        vectorized_datasets.cleanup_cache_files()
-
-        if min_length > 0:
-            vectorized_datasets = vectorized_datasets.filter(
-                lambda x: x > min_length,
+        with self.accelerator.main_process_first():
+            vectorized_datasets = self.raw_datasets.map(
+                prepare_batch,
                 num_proc=self.preprocessing_num_workers,
-                input_columns=["input_length"],
+                remove_columns=self.raw_datasets["train"].column_names,
+                load_from_cache_file=self.use_cached
             )
+            vectorized_datasets.cleanup_cache_files()
 
-        vectorized_datasets = vectorized_datasets.remove_columns("input_length")
+            if min_length > 0:
+                vectorized_datasets = vectorized_datasets.filter(
+                    lambda x: x > min_length,
+                    num_proc=self.preprocessing_num_workers,
+                    input_columns=["input_length"],
+                )
+
+            vectorized_datasets = vectorized_datasets.remove_columns("input_length")
         return vectorized_datasets
