@@ -480,7 +480,7 @@ def train(config: DictConfig, **kwargs):
                             blocking=False,
                             auto_lfs_prune=True,
                         )
-                    logging.info("Saved model new best model...")
+                    logging.info("Saved new best model...")
                 if early_stop:
                     logging.info(
                         "Stopping training, early stopping patience ran out..."
