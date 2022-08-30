@@ -165,7 +165,7 @@ def train(config: DictConfig, **kwargs):
     # Initialize models. Teacher model is initialized from a pretrained model.
     teacher_model = Wav2Vec2ForPreTraining.from_pretrained(
         config.models.pretrained_teacher_model_id
-    )
+    ).to(accelerator.device)
     teacher_model.config.activation_dropout = config.teacher.activation_dropout
     teacher_model.config.attention_dropout = config.teacher.attention_dropout
     teacher_model.config.hidden_dropout = config.teacher.hidden_dropout
@@ -193,7 +193,7 @@ def train(config: DictConfig, **kwargs):
 
     #### Define data collator, loaders, optimizer, loss function and scheduler
     data_collator = DataCollatorForWav2Vec2Pretraining(
-        model=teacher_model, feature_extractor=dataset.feature_extractor
+        model=teacher_model, feature_extractor=dataset.feature_extractor, device=accelerator.device
     )
 
     train_dataloader = DataLoader(
@@ -217,8 +217,8 @@ def train(config: DictConfig, **kwargs):
     )
 
     # Prepare everything with our `accelerator`.
-    student_model, teacher_model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
-        student_model, teacher_model, optimizer, train_dataloader, eval_dataloader
+    student_model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
+        student_model, optimizer, train_dataloader, eval_dataloader
     )
 
     # Loss function
@@ -264,6 +264,11 @@ def train(config: DictConfig, **kwargs):
         "val_num_losses": Inf,
     }
 
+    ###### Evaluate ######
+    ######################
+    ######################
+    ######################
+
     def evaluate(batch, current_best_val_logs, patience):
         # Validate
         student_model.eval()
@@ -277,9 +282,8 @@ def train(config: DictConfig, **kwargs):
         for step, batch in enumerate(eval_dataloader):
             with torch.no_grad():
                 batch.pop("sub_attention_mask", None)
-                teacher_outputs = teacher_model(**batch)
                 student_outputs = student_model(**batch)
-            teacher_projected_states = teacher_outputs.projected_states
+            teacher_projected_states = batch.projected_states
             student_projected_states = student_outputs.projected_states
             loss = KD_loss(
                 input=functional.log_softmax(
@@ -293,10 +297,10 @@ def train(config: DictConfig, **kwargs):
             )
             val_logs["val_loss"] += loss
             val_logs["val_contrastive_loss_diff"] += (
-                teacher_outputs.contrastive_loss - student_outputs.contrastive_loss
+                teacher_contrastive_loss - student_outputs.contrastive_loss
             )
             val_logs["val_diversity_loss_diff"] += (
-                teacher_outputs.diversity_loss - student_outputs.diversity_loss
+                teacher_diversity_loss - student_outputs.diversity_loss
             )
             val_logs["val_num_losses"] += batch["mask_time_indices"].sum()
 
@@ -326,11 +330,15 @@ def train(config: DictConfig, **kwargs):
             else:
                 patience = 0
         return val_logs, early_stop, patience
+    
+    ######################
+    ######################
+    ######################
 
     #### Training loop
     for epoch in range(starting_epoch, config.training.epochs):
         student_model.train()
-        teacher_model.eval()
+        
         for step, batch in enumerate(train_dataloader):
             # compute num of losses
             num_losses = batch["mask_time_indices"].sum()
@@ -343,11 +351,15 @@ def train(config: DictConfig, **kwargs):
             percent_masked = num_losses / sub_attention_mask.sum()
 
             #### Forward
-            with torch.no_grad():
-                teacher_outputs = teacher_model(**batch)
-            student_outputs = student_model(**batch)
+            batch.pop("projected_quantized_states", None)
+            batch.pop("hidden_states", None)
+            teacher_projected_states = batch.pop("projected_states", None)
+            teacher_contrastive_loss = batch.pop("contrastive_loss", None)
+            teacher_codevector_perplexity = batch.pop("codevector_perplexity", None)
+            teacher_diversity_loss = batch.pop("diversity_loss", None)
 
-            teacher_projected_states = teacher_outputs.projected_states
+            
+            student_outputs = student_model(**batch)
             student_projected_states = student_outputs.projected_states
 
             # TODO Think about wether to use `projected_states`, `projected_quantized_states`, or
@@ -417,7 +429,7 @@ def train(config: DictConfig, **kwargs):
 
                 if accelerator.state.num_processes > 1:
                     loss = accelerator.gather(loss).sum()
-                    teacher_outputs.contrastive_loss = accelerator.gather(teacher_outputs.contrastive_loss).sum()
+                    teacher_contrastive_loss = accelerator.gather(teacher_contrastive_loss).sum()
                     student_outputs.diversity_loss = accelerator.gather(student_outputs.diversity_loss).sum()
                     percent_masked = accelerator.gather(percent_masked).sum()
 
@@ -426,18 +438,18 @@ def train(config: DictConfig, **kwargs):
                     "loss": (loss * config.training.gradient_accumulation_steps)
                     / num_losses,
                     "constrast_loss_diff": (
-                        teacher_outputs.contrastive_loss
+                        teacher_contrastive_loss
                         - student_outputs.contrastive_loss
                     )
                     / num_losses,
                     "div_loss": (
-                        teacher_outputs.contrastive_loss
+                        teacher_contrastive_loss
                         - student_outputs.contrastive_loss
                     )
                     / num_losses,
                     "%_mask_idx": percent_masked,
                     "ppl": (
-                        teacher_outputs.codevector_perplexity
+                        teacher_codevector_perplexity
                         - student_outputs.codevector_perplexity
                     ),
                     "lr": torch.tensor(optimizer.param_groups[0]["lr"]),

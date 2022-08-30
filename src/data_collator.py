@@ -80,5 +80,15 @@ class DataCollatorForWav2Vec2Pretraining:
         batch["sampled_negative_indices"] = torch.tensor(
             sampled_negative_indices, dtype=torch.long, device=self.device
         )
+        sub_attention_mask = batch.pop("sub_attention_mask", None)
+        self.model.eval()
+        outputs = self.model(**batch)
+        batch['projected_states'] = outputs.projected_states
+        batch['projected_quantized_states'] = outputs.projected_quantized_states
+        batch['contrastive_loss'] = outputs.contrastive_loss
+        batch['codevector_perplexity'] = outputs.codevector_perplexity
+        batch['hidden_states'] = outputs.hidden_states
+        batch['diversity_loss'] = outputs.diversity_loss
+        batch["sub_attention_mask"] = sub_attention_mask
 
         return batch
