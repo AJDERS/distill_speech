@@ -40,6 +40,8 @@ def train(config: DictConfig, **kwargs):
     """
     #### Check if GPU is available
     logging.info(f"GPU availability: {torch.cuda.is_available()}")
+    if torch.cuda.is_available():
+        logging.info(f"Using {torch.cuda.device_count()} GPU(s)")
 
     # Initialize the accelerator.
     accelerator = Accelerator()
