@@ -7,6 +7,7 @@ import logging
 from numpy import Inf
 from tqdm import tqdm
 from torch.optim import AdamW
+from accelerate.utils import DistributedDataParallelKwargs
 from data import AudioDataset
 from accelerate import Accelerator
 from omegaconf import DictConfig
@@ -44,7 +45,8 @@ def train(config: DictConfig, **kwargs):
         logging.info(f"Using {torch.cuda.device_count()} GPU(s)")
 
     # Initialize the accelerator.
-    accelerator = Accelerator()
+    ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
+    accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
 
     #### Set training seed.
     if config.training.seed is not None:
@@ -60,7 +62,9 @@ def train(config: DictConfig, **kwargs):
         if config.training.push_to_hub:
             if config.models.distilled_model_id is None:
                 if config.models.hub_token != "None":
-                    repo_name = get_full_repo_name(save_dir, token=config.models.hub_token)
+                    repo_name = get_full_repo_name(
+                        save_dir, token=config.models.hub_token
+                    )
             else:
                 repo_name = config.models.distilled_model_id
             repo = Repository(save_dir, clone_from=repo_name)
@@ -181,11 +185,12 @@ def train(config: DictConfig, **kwargs):
     student_model = Wav2Vec2ForPreTraining(student_model_config)
     t_total_params, t_table = count_parameters(teacher_model)
     s_total_params, s_table = count_parameters(student_model)
-    logging.info(f"  Teacher summary: \n {t_table}")
-    logging.info(f"  Student summary: \n {s_table}")
-    logging.info(
-        f"  Parameters ratio (student/teacher): {round((s_total_params/t_total_params), 2)}."
-    )
+    if accelerator.is_main_process:
+        logging.info(f"  Teacher summary: \n {t_table}")
+        logging.info(f"  Student summary: \n {s_table}")
+        logging.info(
+            f"  Parameters ratio (student/teacher): {round((s_total_params/t_total_params), 2)}."
+        )
 
     # Activate gradient checkpointing if enabled
     if config.training.gradient_checkpointing:
@@ -217,7 +222,13 @@ def train(config: DictConfig, **kwargs):
     )
 
     # Prepare everything with our `accelerator`.
-    student_model, teacher_model, optimizer, train_dataloader, eval_dataloader = accelerator.prepare(
+    (
+        student_model,
+        teacher_model,
+        optimizer,
+        train_dataloader,
+        eval_dataloader,
+    ) = accelerator.prepare(
         student_model, teacher_model, optimizer, train_dataloader, eval_dataloader
     )
 
@@ -238,22 +249,30 @@ def train(config: DictConfig, **kwargs):
     )
 
     #### Train
-    total_batch_size = config.training.batch_size * accelerator.num_processes * config.training.gradient_accumulation_steps
-
-
-    logging.info("***** Running training *****")
-    logging.info(f"  Num examples = {len(vectorized_dataset['train'])}")
-    logging.info(f"  Num Epochs = {config.training.epochs}")
-    logging.info(
-        f"  Instantaneous batch size per device = {config.training.batch_size}"
+    total_batch_size = (
+        config.training.batch_size
+        * accelerator.num_processes
+        * config.training.gradient_accumulation_steps
     )
-    logging.info(f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}")
-    logging.info(
-        f"  Gradient Accumulation steps = {config.training.gradient_accumulation_steps}"
-    )
-    logging.info(f"  Total optimization steps = {max_train_steps}")
 
-    progress_bar = tqdm(range(max_train_steps), disable=not accelerator.is_local_main_process)
+    if accelerator.is_main_process:
+        logging.info("***** Running training *****")
+        logging.info(f"  Num examples = {len(vectorized_dataset['train'])}")
+        logging.info(f"  Num Epochs = {config.training.epochs}")
+        logging.info(
+            f"  Instantaneous batch size per device = {config.training.batch_size}"
+        )
+        logging.info(
+            f"  Total train batch size (w. parallel, distributed & accumulation) = {total_batch_size}"
+        )
+        logging.info(
+            f"  Gradient Accumulation steps = {config.training.gradient_accumulation_steps}"
+        )
+        logging.info(f"  Total optimization steps = {max_train_steps}")
+
+    progress_bar = tqdm(
+        range(max_train_steps), disable=not accelerator.is_local_main_process
+    )
     completed_steps = 0
     starting_epoch = 0
     patience = 1
@@ -349,6 +368,12 @@ def train(config: DictConfig, **kwargs):
 
             teacher_projected_states = teacher_outputs.projected_states
             student_projected_states = student_outputs.projected_states
+            teacher_projected_quantized_states = (
+                teacher_outputs.projected_quantized_states
+            )
+            student_projected_quantized_states = (
+                student_outputs.projected_quantized_states
+            )
 
             # TODO Think about wether to use `projected_states`, `projected_quantized_states`, or
             # `hidden_states`
@@ -361,6 +386,18 @@ def train(config: DictConfig, **kwargs):
                 ),
                 target=functional.softmax(
                     teacher_projected_states / config.training.softmax_temperature,
+                    dim=-1,
+                ),
+            )
+            loss += KD_loss(
+                input=functional.log_softmax(
+                    student_projected_quantized_states
+                    / config.training.softmax_temperature,
+                    dim=-1,
+                ),
+                target=functional.softmax(
+                    teacher_projected_quantized_states
+                    / config.training.softmax_temperature,
                     dim=-1,
                 ),
             )
@@ -417,10 +454,13 @@ def train(config: DictConfig, **kwargs):
 
                 if accelerator.state.num_processes > 1:
                     loss = accelerator.gather(loss).sum()
-                    teacher_outputs.contrastive_loss = accelerator.gather(teacher_outputs.contrastive_loss).sum()
-                    student_outputs.diversity_loss = accelerator.gather(student_outputs.diversity_loss).sum()
+                    teacher_outputs.contrastive_loss = accelerator.gather(
+                        teacher_outputs.contrastive_loss
+                    ).sum()
+                    student_outputs.diversity_loss = accelerator.gather(
+                        student_outputs.diversity_loss
+                    ).sum()
                     percent_masked = accelerator.gather(percent_masked).sum()
-
 
                 train_logs = {
                     "loss": (loss * config.training.gradient_accumulation_steps)
@@ -469,7 +509,7 @@ def train(config: DictConfig, **kwargs):
                         unwrapped_student_model.save_pretrained(
                             save_dir,
                             is_main_process=accelerator.is_main_process,
-                            save_function=accelerator.save
+                            save_function=accelerator.save,
                         )
                         unwrapped_student_model.save_pretrained(save_dir)
 
@@ -515,6 +555,7 @@ def count_parameters(model):
         total_params += params
     return total_params, table
 
+
 def multiply_grads(params, c):
     """Multiplies grads by a constant *c*."""
     for p in params:
@@ -522,6 +563,7 @@ def multiply_grads(params, c):
             if torch.is_tensor(c):
                 c = c.to(p.grad.device)
             p.grad.data.mul_(c)
+
 
 def get_grad_norm(params, scale=1):
     """Compute grad norm given a gradient scale."""
@@ -532,6 +574,7 @@ def get_grad_norm(params, scale=1):
             total_norm += param_norm.item() ** 2
     total_norm = total_norm**0.5
     return total_norm
+
 
 if __name__ == "__main__":
     train()
