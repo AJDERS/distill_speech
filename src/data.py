@@ -9,6 +9,7 @@ from datasets.features import Audio
 from transformers import Wav2Vec2FeatureExtractor
 from accelerate import Accelerator
 
+
 class AudioDataset:
     """A dataset containing audio data.
     Args:
@@ -179,17 +180,17 @@ class AudioDataset:
 
         self.raw_datasets = DatasetDict()
         if self.num_train is not None:
-            self.raw_datasets["train"] = Dataset.from_dict(train[:self.num_train])
+            self.raw_datasets["train"] = Dataset.from_dict(train[: self.num_train])
         else:
             self.raw_datasets["train"] = train
 
         if self.num_test is not None:
-            self.raw_datasets["test"] = Dataset.from_dict(test[:self.num_test])
+            self.raw_datasets["test"] = Dataset.from_dict(test[: self.num_test])
         else:
             self.raw_datasets["test"] = test
 
         if self.num_val is not None:
-            self.raw_datasets["validation"] = Dataset.from_dict(train[:self.num_val])
+            self.raw_datasets["validation"] = Dataset.from_dict(train[: self.num_val])
         else:
             self.raw_datasets["validation"] = val
 
@@ -237,7 +238,7 @@ class AudioDataset:
                 prepare_batch,
                 num_proc=self.preprocessing_num_workers,
                 remove_columns=self.raw_datasets["train"].column_names,
-                load_from_cache_file=self.use_cached
+                load_from_cache_file=self.use_cached,
             )
             vectorized_datasets.cleanup_cache_files()
 
