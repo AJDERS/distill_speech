@@ -90,6 +90,9 @@ defaults:
   - _self_
 
 data:
+  load_local: True
+  dataset_local_path: ../data
+  metadata_local_path: manifest
   dataset_id: google/fleurs
   dataset_subset: da_dk
   sampling_rate: 16_000
@@ -114,7 +117,7 @@ training:
   seed: 703
   output_dir: "models"
   batch_size: 1
-  gradient_accumulation_steps: 128
+  gradient_accumulation_steps: 2
   gradient_checkpointing: False
   epochs: 500
   learning_rate: 0.00004

@@ -1,14 +1,19 @@
-from optparse import Option
+import os
+import pandas as pd
+import logging
 from typing import Optional, Tuple
 from datasets import (
     load_dataset as hugging_load_dataset,
     Dataset,
     DatasetDict,
+    IterableDatasetDict
 )
+from pathlib import Path
 from datasets.features import Audio
 from transformers import Wav2Vec2FeatureExtractor
 from accelerate import Accelerator
 
+logging.basicConfig(level=logging.INFO)
 
 class AudioDataset:
     """A dataset containing audio data.
@@ -51,6 +56,8 @@ class AudioDataset:
     def __init__(
         self,
         accelerator: Accelerator,
+        load_local: bool,
+        metadata_path: Path,
         pretrained_teacher_model_id: str,
         dataset_id: str = "google/fleurs",
         dataset_subset: Optional[str] = "da_dk",
@@ -71,8 +78,6 @@ class AudioDataset:
         self.feature_extractor = Wav2Vec2FeatureExtractor.from_pretrained(
             pretrained_teacher_model_id
         )
-        self.dataset_id = dataset_id
-        self.dataset_subset = dataset_subset
         self.sampling_rate = sampling_rate
         self.train_name = train_name
         self.validation_name = validation_name
@@ -87,7 +92,10 @@ class AudioDataset:
         self.use_cached = use_cached
 
         # Load the dataset
-        self._load_dataset()
+        if not load_local:
+            self._load_dataset()
+        else:
+            self._load_local_dataset(metadata_path=metadata_path)
 
     def _load_dataset_split(
         self,
@@ -117,6 +125,81 @@ class AudioDataset:
             )
         except ValueError:
             return DatasetDict.load_from_disk(dataset_id)[split]
+
+    def _load_local_dataset(
+        self, metadata_path: Path, stream: bool = True
+    ) -> Tuple[Dataset, Dataset, Dataset]:
+        """Loads a dataset.
+        Returns:
+            tuple:
+                A triple (train, val, test), containing the three splits of the
+                dataset.
+        """
+        # Create paths
+        train_data_paths_parquet = metadata_path / Path("train_dummy.parquet")
+        test_data_paths_parquet = metadata_path / Path("train_backup_dummy.parquet")
+        val_data_paths_parquet = metadata_path / Path("valid_dummy.parquet")
+
+        # Load DFs
+        logging.info(f"Loading metadata parquets.")
+        train_metadata = pd.read_parquet(train_data_paths_parquet)
+        test_metadata = pd.read_parquet(test_data_paths_parquet)
+        val_metadata = pd.read_parquet(val_data_paths_parquet)
+
+        # Get paths from DFs
+        train_paths = (
+            train_metadata["/work/data/p1-r24syv-segmented/"]
+            .apply(lambda x: "/home/ucloud/data/" + x.split(".wav")[0] + ".wav")
+            .values.tolist()
+        )
+        test_paths = (
+            test_metadata["/work/data/p1-r24syv-segmented/"]
+            .apply(lambda x: "/home/ucloud/data/" + x.split(".wav")[0] + ".wav")
+            .values.tolist()
+        )
+        val_paths = (
+            val_metadata["/work/data/p1-r24syv-segmented/"]
+            .apply(lambda x: "/home/ucloud/data/" + x.split(".wav")[0] + ".wav")
+            .values.tolist()
+        )
+
+        # Check if files exists in paths
+        train_paths = [fname for fname in train_paths if os.path.isfile(fname)]
+        test_paths = [fname for fname in test_paths if os.path.isfile(fname)]
+        val_paths = [fname for fname in val_paths if os.path.isfile(fname)]
+
+        self.len_train_data = len(train_paths)
+
+        # Load splits
+        logging.info(f"Creating training dataset from paths.")
+        train_dataset = hugging_load_dataset(
+            "audiofolder",
+            data_files=train_paths,
+            streaming=stream,
+            drop_metadata=True,
+            drop_labels=True,
+        )
+        logging.info(f"Creating test dataset from paths.")
+        test_dataset = hugging_load_dataset(
+            "audiofolder",
+            data_files=test_paths,
+            streaming=stream,
+            drop_metadata=True,
+            drop_labels=True,
+        )
+        
+        logging.info(f"Creating validation dataset from paths.")
+        val_dataset = hugging_load_dataset(
+            "audiofolder",
+            data_files=val_paths,
+            streaming=stream,
+            drop_metadata=True,
+            drop_labels=True,
+        )
+        self.raw_datasets = IterableDatasetDict()
+        self.raw_datasets["train"] = train_dataset["train"]
+        self.raw_datasets["test"] = test_dataset["train"]
+        self.raw_datasets["validation"] = val_dataset["train"]
 
     def _load_dataset(self) -> Tuple[Dataset, Dataset, Dataset]:
         """Loads a dataset.
@@ -234,13 +317,7 @@ class AudioDataset:
 
             self.preprocessing_num_workers = multiprocessing.cpu_count()
         with self.accelerator.main_process_first():
-            vectorized_datasets = self.raw_datasets.map(
-                prepare_batch,
-                num_proc=self.preprocessing_num_workers,
-                remove_columns=self.raw_datasets["train"].column_names,
-                load_from_cache_file=self.use_cached,
-            )
-            vectorized_datasets.cleanup_cache_files()
+            vectorized_datasets = self.raw_datasets.map(prepare_batch)
 
             if min_length > 0:
                 vectorized_datasets = vectorized_datasets.filter(
