@@ -19,6 +19,7 @@ from huggingface_hub.repository import Repository
 from transformers.utils import get_full_repo_name
 from torch.utils.data.dataloader import DataLoader
 from data_collator import DataCollatorForWav2Vec2Pretraining
+from datasets import utils as dataset_utils
 from transformers import (
     Wav2Vec2Config,
     Wav2Vec2ForPreTraining,
@@ -27,6 +28,7 @@ from transformers import (
 )
 
 logging.basicConfig(level=logging.INFO)
+dataset_utils.logging.set_verbosity_error()
 
 
 @hydra.main(config_path="../config", config_name="config", version_base=None)
@@ -41,9 +43,10 @@ def train(config: DictConfig, **kwargs):
             Keyword arguments to be passed to the config
     """
     #### Check if GPU is available
-    logging.info(f"GPU availability: {torch.cuda.is_available()}")
-    if torch.cuda.is_available():
-        logging.info(f"Using {torch.cuda.device_count()} GPU(s)")
+    if accelerator.is_main_process:
+        logging.info(f"GPU availability: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            logging.info(f"Using {torch.cuda.device_count()} GPU(s)")
 
     # Initialize the accelerator.
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
@@ -56,10 +59,16 @@ def train(config: DictConfig, **kwargs):
     #### Create HF epository
     if accelerator.is_main_process:
         if config.training.output_dir is not None:
-            save_dir = os.path.join(
-                config.training.output_dir,
-                f"{config.models.pretrained_teacher_model_id}_{config.data.dataset_id}",
-            )
+            if config.data.load_local:
+                save_dir = os.path.join(
+                    config.training.output_dir,
+                    f"{config.models.pretrained_teacher_model_id}_radio",
+                )
+            else:
+                save_dir = os.path.join(
+                    config.training.output_dir,
+                    f"{config.models.pretrained_teacher_model_id}_{config.data.dataset_id}",
+                )
         if config.training.push_to_hub:
             if config.models.distilled_model_id is None:
                 if config.models.hub_token != "None":
@@ -190,8 +199,9 @@ def train(config: DictConfig, **kwargs):
     t_total_params, t_table = count_parameters(teacher_model)
     s_total_params, s_table = count_parameters(student_model)
     if accelerator.is_main_process:
-        logging.info(f"  Teacher summary: \n {t_table}")
-        logging.info(f"  Student summary: \n {s_table}")
+        if config.training.verbose:
+            logging.info(f"  Teacher summary: \n {t_table}")
+            logging.info(f"  Student summary: \n {s_table}")
         logging.info(
             f"  Parameters ratio (student/teacher): {round((s_total_params/t_total_params), 2)}."
         )
@@ -202,7 +212,7 @@ def train(config: DictConfig, **kwargs):
 
     #### Define data collator, loaders, optimizer, loss function and scheduler
     data_collator = DataCollatorForWav2Vec2Pretraining(
-        model=teacher_model, feature_extractor=dataset.feature_extractor
+        model=teacher_model, feature_extractor=dataset.feature_extractor, padding="max_length"
     )
     train_torch_iterable_dataset = vectorized_dataset["train"].with_format("torch")
     train_dataloader = DataLoader(
@@ -543,8 +553,9 @@ def train(config: DictConfig, **kwargs):
         optimizer.zero_grad()
 
         # Save model
-        if config.training.output_dir is not None:
-            student_model.save_pretrained(save_dir)
+        if config.training.output_dir is not None and accelerator.is_main_process:
+            unwrapped_student_model = accelerator.unwrap_model(student_model)
+            unwrapped_student_model.save_pretrained(save_dir)
 
             if config.training.push_to_hub:
                 repo.push_to_hub(
