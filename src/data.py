@@ -136,12 +136,13 @@ class AudioDataset:
                 dataset.
         """
         # Create paths
-        train_data_paths_parquet = metadata_path / Path("train_dummy.parquet")
-        test_data_paths_parquet = metadata_path / Path("train_backup_dummy.parquet")
-        val_data_paths_parquet = metadata_path / Path("valid_dummy.parquet")
+        train_data_paths_parquet = metadata_path / Path("train.parquet")
+        test_data_paths_parquet = metadata_path / Path("train_backup.parquet")
+        val_data_paths_parquet = metadata_path / Path("valid.parquet")
 
         # Load DFs
-        logging.info(f"Loading metadata parquets.")
+        if self.accelerator.is_main_process:
+            logging.info(f"Loading metadata parquets.")
         train_metadata = pd.read_parquet(train_data_paths_parquet)
         test_metadata = pd.read_parquet(test_data_paths_parquet)
         val_metadata = pd.read_parquet(val_data_paths_parquet)
@@ -171,7 +172,8 @@ class AudioDataset:
         self.len_train_data = len(train_paths)
 
         # Load splits
-        logging.info(f"Creating training dataset from paths.")
+        if self.accelerator.is_main_process:
+            logging.info(f"Creating training dataset from paths.")
         train_dataset = hugging_load_dataset(
             "audiofolder",
             data_files=train_paths,
@@ -179,7 +181,8 @@ class AudioDataset:
             drop_metadata=True,
             drop_labels=True,
         )
-        logging.info(f"Creating test dataset from paths.")
+        if self.accelerator.is_main_process:
+            logging.info(f"Creating test dataset from paths.")
         test_dataset = hugging_load_dataset(
             "audiofolder",
             data_files=test_paths,
@@ -187,8 +190,8 @@ class AudioDataset:
             drop_metadata=True,
             drop_labels=True,
         )
-        
-        logging.info(f"Creating validation dataset from paths.")
+        if self.accelerator.is_main_process:
+            logging.info(f"Creating validation dataset from paths.")
         val_dataset = hugging_load_dataset(
             "audiofolder",
             data_files=val_paths,
