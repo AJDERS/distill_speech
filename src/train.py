@@ -42,16 +42,17 @@ def train(config: DictConfig, **kwargs):
         **kwargs:
             Keyword arguments to be passed to the config
     """
-    #### Check if GPU is available
-    if accelerator.is_main_process:
-        logging.info(f"GPU availability: {torch.cuda.is_available()}")
-        if torch.cuda.is_available():
-            logging.info(f"Using {torch.cuda.device_count()} GPU(s)")
 
     # Initialize the accelerator.
     ddp_kwargs = DistributedDataParallelKwargs(find_unused_parameters=True)
     accelerator = Accelerator(kwargs_handlers=[ddp_kwargs])
 
+    #### Check if GPU is available
+    if accelerator.is_main_process:
+        logging.info(f"GPU availability: {torch.cuda.is_available()}")
+        if torch.cuda.is_available():
+            logging.info(f"Using {torch.cuda.device_count()} GPU(s)")
+            
     #### Set training seed.
     if config.training.seed is not None:
         set_seed(config.training.seed)
