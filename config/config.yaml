@@ -117,7 +117,7 @@ training:
   seed: 703
   output_dir: "models"
   batch_size: 1
-  gradient_accumulation_steps: 2
+  gradient_accumulation_steps: 128
   gradient_checkpointing: False
   epochs: 500
   learning_rate: 0.00004
@@ -132,4 +132,5 @@ training:
   early_stopping: True
   early_stopping_patience: 5
   push_to_hub: True
-  pad_to_multiple_of: 32
+  pad_to_multiple_of: None
+  verbose: False
