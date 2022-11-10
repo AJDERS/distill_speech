@@ -4,6 +4,7 @@ import math
 import torch
 import hydra
 import logging
+from pathlib import Path
 from numpy import Inf
 from tqdm import tqdm
 from torch.optim import AdamW
@@ -73,8 +74,11 @@ def train(config: DictConfig, **kwargs):
     accelerator.wait_for_everyone()
 
     #### Load dataset
+    metadata_path = Path(config.data.dataset_local_path) / config.data.metadata_local_path
     dataset = AudioDataset(
         accelerator=accelerator,
+        load_local=config.data.load_local,
+        metadata_path=metadata_path,
         pretrained_teacher_model_id=config.models.pretrained_teacher_model_id,
         dataset_id=config.data.dataset_id,
         dataset_subset=config.data.dataset_subset,
@@ -200,15 +204,15 @@ def train(config: DictConfig, **kwargs):
     data_collator = DataCollatorForWav2Vec2Pretraining(
         model=teacher_model, feature_extractor=dataset.feature_extractor
     )
-
+    train_torch_iterable_dataset = vectorized_dataset["train"].with_format("torch")
     train_dataloader = DataLoader(
-        vectorized_dataset["train"],
-        shuffle=True,
+        train_torch_iterable_dataset,
         collate_fn=data_collator,
         batch_size=config.training.batch_size,
     )
+    validation_torch_iterable_dataset = vectorized_dataset["validation"].with_format("torch")
     eval_dataloader = DataLoader(
-        vectorized_dataset["validation"],
+        validation_torch_iterable_dataset,
         collate_fn=data_collator,
         batch_size=config.training.batch_size,
     )
@@ -237,7 +241,7 @@ def train(config: DictConfig, **kwargs):
 
     # Scheduler and math around the number of training steps.
     num_update_steps_per_epoch = math.ceil(
-        len(train_dataloader) / config.training.gradient_accumulation_steps
+        dataset.len_train_data / config.training.gradient_accumulation_steps
     )
     max_train_steps = config.training.epochs * num_update_steps_per_epoch
 
@@ -257,7 +261,7 @@ def train(config: DictConfig, **kwargs):
 
     if accelerator.is_main_process:
         logging.info("***** Running training *****")
-        logging.info(f"  Num examples = {len(vectorized_dataset['train'])}")
+        logging.info(f"  Num examples = {dataset.len_train_data}")
         logging.info(f"  Num Epochs = {config.training.epochs}")
         logging.info(
             f"  Instantaneous batch size per device = {config.training.batch_size}"
@@ -418,9 +422,7 @@ def train(config: DictConfig, **kwargs):
             # update parameters
             if (
                 step + 1
-            ) % config.training.gradient_accumulation_steps == 0 or step == len(
-                train_dataloader
-            ) - 1:
+            ) % config.training.gradient_accumulation_steps == 0 or step == (config.training.epochs - 1):
 
                 # compute grad norm for monitoring
                 scale = (
@@ -533,6 +535,14 @@ def train(config: DictConfig, **kwargs):
         current_best_val_logs, early_stop, patience = evaluate(
             batch, current_best_val_logs, patience
         )
+        # If gradient accumulation is less than the number of steps taking in an epoch
+        # The parameters are never updated, so we do it here.
+        progress_bar.update(1)
+        completed_steps += 1
+        optimizer.step()
+        optimizer.zero_grad()
+
+        # Save model
         if config.training.output_dir is not None:
             student_model.save_pretrained(save_dir)
 
