@@ -42,6 +42,8 @@ class DataCollatorForWav2Vec2Pretraining:
             padding=self.padding,
             pad_to_multiple_of=self.pad_to_multiple_of,
             return_tensors="pt",
+            truncation=True,
+            max_length=240_000
         )
         batch = batch.to(self.device)
         batch_size = batch["input_values"].shape[0]
