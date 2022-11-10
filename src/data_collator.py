@@ -36,8 +36,9 @@ class DataCollatorForWav2Vec2Pretraining:
         self, features: List[Dict[str, Union[List[int], torch.Tensor]]]
     ) -> Dict[str, torch.Tensor]:
         # reformat list to dict and set to pytorch format
+        input_features = [{"input_values": feature["input_values"]} for feature in features]
         batch = self.feature_extractor.pad(
-            features,
+            input_features,
             padding=self.padding,
             pad_to_multiple_of=self.pad_to_multiple_of,
             return_tensors="pt",
